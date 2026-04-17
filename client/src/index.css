@@ -1,11 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import 'tailwindcss';
 
 :root {
-  font-family:
-    'Inter', 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif;
-  color: #f4f4f5;
-  background-color: #050505;
+  --bg-deep: #08131d;
+  --bg-card: rgba(8, 22, 34, 0.62);
+  --line-soft: rgba(148, 163, 184, 0.28);
+  --accent-cyan: #34d6ff;
+  --accent-amber: #ffb257;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  color: #e5edf5;
+  background-color: var(--bg-deep);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -19,9 +23,10 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at 15% 15%, rgba(6, 78, 59, 0.2), transparent 38%),
-    radial-gradient(circle at 80% 0%, rgba(8, 145, 178, 0.23), transparent 35%),
-    #050505;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(52, 214, 255, 0.18), transparent 38%),
+    radial-gradient(circle at 82% 7%, rgba(255, 178, 87, 0.17), transparent 42%),
+    linear-gradient(180deg, #08131d 0%, #060f18 55%, #050d14 100%);
 }
 
 #root {
@@ -29,14 +34,17 @@ body {
 }
 
 .glass-panel {
-  border: 1px solid rgba(63, 63, 70, 0.65);
+  border: 1px solid var(--line-soft);
   border-radius: 1.25rem;
-  background: linear-gradient(
-    150deg,
-    rgba(24, 24, 27, 0.74),
-    rgba(10, 10, 10, 0.42)
-  );
+  background: linear-gradient(150deg, rgba(9, 26, 39, 0.8), rgba(7, 19, 29, 0.58));
   backdrop-filter: blur(18px);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 28px 85px rgba(0, 0, 0, 0.4);
   padding: 1.2rem;
+}
+
+h1,
+h2,
+h3,
+.display-font {
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
 }

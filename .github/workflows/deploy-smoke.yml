@@ -1,0 +1,53 @@
+name: Deploy Smoke Checks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Install Server Dependencies
+        run: npm --prefix server ci
+
+      - name: Install Client Dependencies
+        run: npm --prefix client ci
+
+      - name: Run Server Tests
+        run: npm --prefix server test
+
+      - name: Build Client
+        run: npm --prefix client run build
+
+      - name: API Smoke Test
+        env:
+          NODE_ENV: test
+          PORT: 5000
+          AUTH_JWT_SECRET: ci-smoke-secret
+          CORS_ORIGINS: http://localhost:5173
+          SMOKE_API_BASE_URL: http://localhost:5000
+        run: |
+          npm --prefix server start &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID' EXIT
+          node server/scripts/smoke-test.js

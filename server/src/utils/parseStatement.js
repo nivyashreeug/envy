@@ -1,121 +1,236 @@
-const { parse } = require('csv-parse/sync')
+const { parse: parseCsv } = require('csv-parse/sync')
 
-const DATE_KEYS = ['date', 'transaction date', 'posted date', 'posting date']
-const DESC_KEYS = ['description', 'merchant', 'details', 'narrative', 'memo']
-const AMOUNT_KEYS = ['amount', 'debit', 'withdrawal', 'value']
+const DATE_REGEX = /\b(\d{1,4}[/-]\d{1,2}[/-]\d{1,4})\b/
+const AMOUNT_REGEX = /-?\(?[₹$]?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\)?/g
 
-function normalizeAmount(value) {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : 0
-  }
+function cleanLine(line) {
+  return line.replace(/\s{2,}/g, ' ').trim()
+}
 
-  const cleaned = String(value || '')
-    .replace(/\$/g, '')
-    .replace(/,/g, '')
-    .replace(/\s+/g, '')
-
-  if (!cleaned) {
+function normalizeAmount(token) {
+  if (!token) {
     return 0
   }
 
-  if (/^\(.*\)$/.test(cleaned)) {
-    const inner = cleaned.slice(1, -1)
-    const parsed = Number.parseFloat(inner)
-    return Number.isFinite(parsed) ? -Math.abs(parsed) : 0
+  const trimmed = token.trim()
+  const isNegative = /^-/.test(trimmed) || /^\(.*\)$/.test(trimmed)
+  const numeric = trimmed.replace(/[₹$,()]/g, '').replace(/^-/, '')
+  const value = Number.parseFloat(numeric)
+
+  if (Number.isNaN(value)) {
+    return 0
   }
 
-  const parsed = Number.parseFloat(cleaned)
-  return Number.isFinite(parsed) ? parsed : 0
+  return isNegative ? -Math.abs(value) : value
 }
 
-function findKey(record, keys) {
-  const normalized = Object.keys(record).reduce((acc, key) => {
-    acc[key.toLowerCase().trim()] = key
-    return acc
-  }, {})
-
-  for (const key of keys) {
-    if (normalized[key]) {
-      return normalized[key]
-    }
+function normalizeDateToken(token) {
+  if (!token) {
+    return token
   }
 
-  return null
+  const parts = token.split(/[/-]/).map((part) => part.trim())
+
+  if (parts.length !== 3) {
+    return token
+  }
+
+  const [first, second, third] = parts
+
+  if (first.length === 4) {
+    return `${first}-${second.padStart(2, '0')}-${third.padStart(2, '0')}`
+  }
+
+  if (third.length === 4) {
+    const day = first.padStart(2, '0')
+    const month = second.padStart(2, '0')
+    return `${third}-${month}-${day}`
+  }
+
+  return token
 }
 
-function parseCsvStatement(buffer) {
-  const csvText = buffer.toString('utf-8')
-  const rows = parse(csvText, {
-    columns: true,
-    skip_empty_lines: true,
-    relax_column_count: true,
-    trim: true,
-  })
-
-  return rows.map((row, index) => {
-    const dateKey = findKey(row, DATE_KEYS)
-    const descKey = findKey(row, DESC_KEYS)
-    const amountKey = findKey(row, AMOUNT_KEYS)
-
-    return {
-      id: `txn_${index + 1}`,
-      date: String(dateKey ? row[dateKey] : ''),
-      description: String(descKey ? row[descKey] : '').trim(),
-      amount: normalizeAmount(amountKey ? row[amountKey] : 0),
-    }
-  })
+function isValidTransaction(line) {
+  return DATE_REGEX.test(line) && AMOUNT_REGEX.test(line)
 }
 
-function parsePdfLine(line, index) {
-  const compact = line.trim().replace(/\s{2,}/g, ' ')
-  if (!compact) {
-    return null
+function inferSignedAmountFromLine(line, amount) {
+  const hasExplicitCredit = /\b(cr|credit|refund|reversal|deposit|salary|interest)\b/i.test(line)
+  const hasExplicitDebit =
+    /\b(dr|debit|withdrawal|purchase|charge|fee|payment|upi|pos|atm)\b/i.test(line)
+
+  if (hasExplicitCredit && !hasExplicitDebit) {
+    return Math.abs(amount)
   }
 
-  const dateMatch = compact.match(/\b(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b/)
-  const amountMatches = compact.match(/-?\$?\d+[\d,]*\.\d{2}/g)
-
-  if (!dateMatch || !amountMatches || amountMatches.length === 0) {
-    return null
+  if (hasExplicitDebit) {
+    return -Math.abs(amount)
   }
 
-  const amountToken = amountMatches[amountMatches.length - 1]
-  const amount = normalizeAmount(amountToken)
-  const description = compact
+  // Most statement transaction lines are debits when no sign marker is present.
+  if (amount >= 0) {
+    return -Math.abs(amount)
+  }
+
+  return amount
+}
+
+function extractTransaction(line, index) {
+  const dateMatch = line.match(DATE_REGEX)
+  const amounts = line.match(AMOUNT_REGEX)
+
+  if (!dateMatch || !amounts) return null
+
+  const amountToken = amounts[amounts.length - 1]
+  let amount = inferSignedAmountFromLine(line, normalizeAmount(amountToken))
+
+  if (/cr/i.test(line)) amount = Math.abs(amount)
+  if (/dr/i.test(line)) amount = -Math.abs(amount)
+
+  const description = line
     .replace(dateMatch[0], '')
     .replace(amountToken, '')
+    .replace(/\b(?:cr|dr)\b/gi, '')
     .trim()
+
+  if (!description || description.length < 3) return null
 
   return {
     id: `txn_pdf_${index + 1}`,
-    date: dateMatch[0],
+    date: normalizeDateToken(dateMatch[0]),
     description,
     amount,
   }
 }
 
-async function parsePdfStatement(buffer) {
-  const pdfParse = require('pdf-parse')
-  const { text } = await pdfParse(buffer)
-  const lines = text.split(/\r?\n/)
+function toTransaction(record, index) {
+  const normalizedRecord = Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key.toLowerCase().trim(), value])
+  )
 
-  return lines
-    .map((line, index) => parsePdfLine(line, index))
-    .filter((row) => row && row.description)
+  const rawDate = normalizedRecord.date || normalizedRecord['transaction date'] || normalizedRecord['posting date']
+  const rawDescription = normalizedRecord.description || normalizedRecord.details || normalizedRecord.merchant || normalizedRecord.payee
+  const rawAmount = normalizedRecord.amount || normalizedRecord.debit || normalizedRecord.credit
+
+  if (!rawDate || !rawDescription || rawAmount === undefined || rawAmount === null || rawAmount === '') {
+    return null
+  }
+
+  let amount = normalizeAmount(String(rawAmount))
+
+  if (normalizedRecord.debit && !normalizedRecord.credit) {
+    amount = -Math.abs(amount)
+  }
+
+  if (normalizedRecord.credit && !normalizedRecord.debit) {
+    amount = Math.abs(amount)
+  }
+
+  return {
+    id: `txn_csv_${index + 1}`,
+    date: normalizeDateToken(String(rawDate).trim()),
+    description: String(rawDescription).trim(),
+    amount,
+  }
+}
+
+async function parseCsvStatement(buffer) {
+  const text = buffer.toString('utf8')
+
+  if (!text.trim()) {
+    return []
+  }
+
+  const records = parseCsv(text, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+  })
+
+  return records.map(toTransaction).filter(Boolean)
+}
+
+async function parsePdfStatement(buffer) {
+  try {
+    const pdfParseModule = require('pdf-parse')
+    let data
+
+    // pdf-parse v2 exposes a class API via { PDFParse }.
+    if (typeof pdfParseModule.PDFParse === 'function') {
+      const parser = new pdfParseModule.PDFParse({ data: buffer })
+
+      try {
+        data = await parser.getText()
+      } finally {
+        if (typeof parser.destroy === 'function') {
+          await parser.destroy()
+        }
+      }
+    } else {
+      // Backward compatibility for pdf-parse v1 function export.
+      const pdfParser =
+        typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default
+
+      if (typeof pdfParser !== 'function') {
+        throw new Error('pdf-parse parser API not available')
+      }
+
+      data = await pdfParser(buffer)
+    }
+
+    if (!data.text) {
+      throw new Error('Empty PDF')
+    }
+
+    const lines = data.text.split('\n').map(cleanLine).filter(Boolean)
+    const mergedLines = []
+    let pendingLine = ''
+
+    for (const line of lines) {
+      if (DATE_REGEX.test(line)) {
+        if (pendingLine) {
+          mergedLines.push(pendingLine)
+        }
+        pendingLine = line
+      } else {
+        pendingLine = pendingLine ? `${pendingLine} ${line}` : line
+      }
+    }
+
+    if (pendingLine) {
+      mergedLines.push(pendingLine)
+    }
+
+    return mergedLines.filter(isValidTransaction).map((line, index) => extractTransaction(line, index)).filter(Boolean)
+  } catch (err) {
+    console.error('PDF parsing failed:', err.message)
+    throw new Error(`PDF parsing failed: ${err.message}`)
+  }
 }
 
 async function parseStatementFile(file) {
-  const ext = (file.originalname.split('.').pop() || '').toLowerCase()
+  if (!file || !file.buffer) {
+    throw new Error('No statement file provided')
+  }
 
-  if (ext === 'csv') {
+  const extension = (file.originalname || '').split('.').pop().toLowerCase()
+  const mimetype = (file.mimetype || '').toLowerCase()
+
+  if (extension === 'csv' || mimetype.includes('csv')) {
     return parseCsvStatement(file.buffer)
   }
 
-  if (ext === 'pdf') {
+  if (extension === 'pdf' || mimetype.includes('pdf')) {
     return parsePdfStatement(file.buffer)
   }
 
   throw new Error('Unsupported file format. Please upload CSV or PDF.')
 }
 
-module.exports = { parseStatementFile }
+module.exports = {
+  parseStatementFile,
+  parseCsvStatement,
+  parsePdfStatement,
+  normalizeAmount,
+}

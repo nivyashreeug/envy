@@ -2,19 +2,25 @@ const express = require('express')
 const cors = require('cors')
 const multer = require('multer')
 const mongoose = require('mongoose')
+const bcrypt = require('bcryptjs')
 const helmet = require('helmet')
 const compression = require('compression')
 const morgan = require('morgan')
 const rateLimit = require('express-rate-limit')
+const { RedisStore } = require('rate-limit-redis')
+const Redis = require('ioredis')
 const path = require('path')
 const fs = require('fs')
 const FeeReport = require('./models/FeeReport')
+const { createUser, findUserByEmail } = require('./utils/authStore')
+const { requireAuth, signAuthToken, toPublicUser } = require('./middleware/auth')
 const { parseStatementFile } = require('./utils/parseStatement')
 const { analyzeTransactions } = require('./utils/analyzeFees')
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler')
 
 const TEN_MB = 10 * 1024 * 1024
 const ALLOWED_EXTENSIONS = new Set(['csv', 'pdf'])
+const MIN_PASSWORD_LENGTH = 8
 
 function getAllowedOrigins() {
   const origins = process.env.CORS_ORIGINS || process.env.CLIENT_ORIGIN || 'http://localhost:5173'
@@ -22,6 +28,42 @@ function getAllowedOrigins() {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean)
+}
+
+function isLocalDevOrigin(origin) {
+  if (!origin || process.env.NODE_ENV === 'production') {
+    return false
+  }
+
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+}
+
+function getRateLimitConfig() {
+  const config = {
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.RATE_LIMIT_MAX || 120),
+    standardHeaders: true,
+    legacyHeaders: false,
+  }
+
+  if (!process.env.REDIS_URL) {
+    return config
+  }
+
+  try {
+    const redisClient = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    })
+
+    config.store = new RedisStore({
+      sendCommand: (...args) => redisClient.call(...args),
+    })
+  } catch (error) {
+    console.warn('Redis rate limit store unavailable. Falling back to in-memory limiter.')
+  }
+
+  return config
 }
 
 const storage = multer.memoryStorage()
@@ -45,21 +87,14 @@ function createApp() {
   app.disable('x-powered-by')
   app.use(helmet())
   app.use(compression())
-  app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: Number(process.env.RATE_LIMIT_MAX || 120),
-      standardHeaders: true,
-      legacyHeaders: false,
-    })
-  )
+  app.use(rateLimit(getRateLimitConfig()))
 
   app.use(
     cors({
       origin: (origin, callback) => {
         const allowedOrigins = getAllowedOrigins()
 
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || allowedOrigins.includes(origin) || isLocalDevOrigin(origin)) {
           return callback(null, true)
         }
 
@@ -74,15 +109,107 @@ function createApp() {
     app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
   }
 
+  app.get('/', (req, res) => {
+    res.json({
+      status: 'ok',
+      message: 'Envy API is running',
+      routes: ['/api/health', '/api/auth/register', '/api/auth/login', '/api/analyze'],
+    })
+  })
+
+  app.get('/api', (req, res) => {
+    res.json({
+      status: 'ok',
+      message: 'Use GET /api/health, POST /api/auth/register, POST /api/auth/login, or POST /api/analyze',
+    })
+  })
+
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
-      message: 'Invisible Fee Tracker API is live',
+      message: 'Envy API is live',
       uptime: Math.round(process.uptime()),
     })
   })
 
-  app.post('/api/analyze', upload.single('statement'), async (req, res, next) => {
+  app.post('/api/auth/register', async (req, res, next) => {
+    try {
+      const name = String(req.body?.name || '').trim()
+      const email = String(req.body?.email || '').trim().toLowerCase()
+      const password = String(req.body?.password || '').trim()
+
+      if (!name || !email || !password) {
+        res.status(400)
+        throw new Error('Name, email, and password are required.')
+      }
+
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        res.status(400)
+        throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`)
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12)
+      const user = await createUser({ name, email, passwordHash })
+      const token = signAuthToken(user.id || user._id)
+
+      return res.status(201).json({
+        token,
+        user: toPublicUser(user),
+      })
+    } catch (error) {
+      if (error.code === 'DUPLICATE_EMAIL') {
+        res.status(409)
+      } else if (/Authentication store unavailable/i.test(error.message || '')) {
+        res.status(503)
+      }
+
+      return next(error)
+    }
+  })
+
+  app.post('/api/auth/login', async (req, res, next) => {
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase()
+      const password = String(req.body?.password || '').trim()
+
+      if (!email || !password) {
+        res.status(400)
+        throw new Error('Email and password are required.')
+      }
+
+      const user = await findUserByEmail(email)
+
+      if (!user) {
+        res.status(401)
+        throw new Error('Invalid email or password.')
+      }
+
+      const passwordMatches = await bcrypt.compare(password, user.passwordHash)
+
+      if (!passwordMatches) {
+        res.status(401)
+        throw new Error('Invalid email or password.')
+      }
+
+      const token = signAuthToken(user.id || user._id)
+      return res.json({
+        token,
+        user: toPublicUser(user),
+      })
+    } catch (error) {
+      if (/Authentication store unavailable/i.test(error.message || '')) {
+        res.status(503)
+      }
+
+      return next(error)
+    }
+  })
+
+  app.get('/api/auth/me', requireAuth, (req, res) => {
+    res.json({ user: req.auth.user })
+  })
+
+  app.post('/api/analyze', requireAuth, upload.single('statement'), async (req, res, next) => {
     try {
       if (!req.file) {
         res.status(400)
@@ -106,6 +233,9 @@ function createApp() {
           totals: report.totals,
           wallOfShame: report.wallOfShame,
           monthlyTrend: report.monthlyTrend,
+          insights: report.insights,
+          anomalies: report.anomalies,
+          timeline: report.timeline,
         })
       }
 
