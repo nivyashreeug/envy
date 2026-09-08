@@ -304,7 +304,7 @@ function createApp() {
   if (process.env.NODE_ENV === 'production' && fs.existsSync(clientDistPath)) {
     app.use(express.static(clientDistPath))
 
-    app.get('*', (req, res) => {
+    app.get('/{*splat}', (req, res) => {
       res.sendFile(path.join(clientDistPath, 'index.html'))
     })
   }
