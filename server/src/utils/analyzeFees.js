@@ -1,13 +1,14 @@
-const { FEE_KEYWORDS } = require('./feeKeywords')
-
-function normalizeMerchant(description) {
-  return description
-    .toLowerCase()
-    .replace(/\d{3,}/g, '')
-    .replace(/[^a-z\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+const { FEE_KEYWORDS, detectBankFeeReason } = require('./feeKeywords')
+const {
+  CATEGORIES,
+  CLASSIFICATIONS,
+  normalizeMerchant,
+  categorizeTransaction,
+} = require('./transactionClassifier')
+const { detectRecurringPayments } = require('./recurringDetector')
+const { detectSpendingAnomalies, getStats } = require('./anomalyDetector')
+const { calculateRiskAndExplanation } = require('./riskScorer')
+const { calculatePotentialSavings } = require('./savingsEstimator')
 
 function toMonthKey(rawDate) {
   const date = new Date(rawDate)
@@ -27,20 +28,8 @@ function toDateKey(rawDate) {
   return date.toISOString().slice(0, 10)
 }
 
-function getStats(values) {
-  if (!values.length) {
-    return { avg: 0, stdDev: 0 }
-  }
-
-  const avg = values.reduce((sum, value) => sum + value, 0) / values.length
-  const variance =
-    values.reduce((sum, value) => sum + (value - avg) ** 2, 0) / values.length
-
-  return { avg, stdDev: Math.sqrt(variance) }
-}
-
 function buildHiddenTimeline(hiddenTransactions) {
-  const dailyTotalsMap = hiddenTransactions.reduce((acc, txn) => {
+  const dailyTotalsMap = (hiddenTransactions || []).reduce((acc, txn) => {
     const dayKey = toDateKey(txn.date)
 
     if (!dayKey) {
@@ -51,7 +40,7 @@ function buildHiddenTimeline(hiddenTransactions) {
       acc[dayKey] = { date: dayKey, total: 0, count: 0, microDebitCount: 0 }
     }
 
-    const debitAmount = Math.abs(txn.amount)
+    const debitAmount = Math.abs(txn.amount || 0)
     acc[dayKey].total += debitAmount
     acc[dayKey].count += 1
 
@@ -126,54 +115,117 @@ function buildHiddenTimeline(hiddenTransactions) {
 }
 
 function isKeywordMatch(description) {
+  if (!description || typeof description !== 'string') return false
   const text = description.toLowerCase()
   return FEE_KEYWORDS.some((keyword) => text.includes(keyword))
 }
 
 function analyzeTransactions(transactions) {
-  const recurringMap = new Map()
+  const safeTransactions = Array.isArray(transactions) ? transactions : []
 
-  for (const txn of transactions) {
-    if (txn.amount >= 0) {
+  // 1. Run Recurring Payment and Subscription Intelligence
+  const { recurringPayments, recurringLookup } = detectRecurringPayments(safeTransactions)
+
+  // 2. Run Spending Anomaly and Micro-Debit Intelligence
+  const { stats: datasetStats, anomalousTransactionIds, microDebitMap } =
+    detectSpendingAnomalies(safeTransactions)
+
+  // 3. Count basic merchant frequency for legacy compatibility
+  const recurringCountMap = new Map()
+  for (const txn of safeTransactions) {
+    if (!txn || typeof txn.amount !== 'number' || txn.amount >= 0) {
       continue
     }
 
     const merchantKey = normalizeMerchant(txn.description)
-    if (!merchantKey) {
-      continue
+    if (merchantKey && merchantKey !== 'unknown') {
+      recurringCountMap.set(merchantKey, (recurringCountMap.get(merchantKey) || 0) + 1)
     }
-
-    recurringMap.set(merchantKey, (recurringMap.get(merchantKey) || 0) + 1)
   }
 
   const hidden = []
   const transparent = []
+  const transactionInsights = []
 
-  for (const txn of transactions) {
+  for (const txn of safeTransactions) {
+    if (!txn) continue
+
     const debitAmount = txn.amount < 0 ? Math.abs(txn.amount) : 0
     const merchantKey = normalizeMerchant(txn.description)
+    const category = categorizeTransaction(txn.description, merchantKey)
+    const bankFeeReason = detectBankFeeReason(txn.description)
+    const isAnomalous = anomalousTransactionIds.has(txn.id)
+    const microDebitInfo = microDebitMap.get((txn.description || '').toLowerCase().trim()) || null
+    const recurringInfo = recurringLookup.get(merchantKey) || null
 
     const looksRecurringMicroDebit =
-      txn.amount < 0 && debitAmount <= 5 && (recurringMap.get(merchantKey) || 0) >= 3
+      txn.amount < 0 && debitAmount <= 5 && (recurringCountMap.get(merchantKey) || 0) >= 3
 
     const isHidden =
-      txn.amount < 0 && (isKeywordMatch(txn.description) || looksRecurringMicroDebit)
+      txn.amount < 0 &&
+      (isKeywordMatch(txn.description) || Boolean(bankFeeReason) || looksRecurringMicroDebit)
 
     if (isHidden) {
       hidden.push(txn)
     } else {
       transparent.push(txn)
     }
+
+    // Generate deterministic risk score, confidence, classification, and structured explanation
+    const riskAnalysis = calculateRiskAndExplanation({
+      transaction: txn,
+      normalizedMerchant: merchantKey,
+      category,
+      bankFeeReason,
+      recurringInfo,
+      isStatisticalAnomaly: isAnomalous,
+      microDebitInfo,
+      totalTransactionsCount: safeTransactions.length,
+      datasetStats,
+    })
+
+    transactionInsights.push({
+      id: txn.id,
+      date: txn.date,
+      description: txn.description,
+      normalizedMerchant: merchantKey,
+      amount: txn.amount,
+      category,
+      classification: riskAnalysis.classification,
+      riskScore: riskAnalysis.riskScore,
+      riskLevel: riskAnalysis.riskLevel,
+      confidence: riskAnalysis.confidence,
+      reasons: riskAnalysis.reasons,
+      recurringInfo: recurringInfo
+        ? {
+            frequency: recurringInfo.frequency,
+            occurrences: recurringInfo.occurrences,
+            averageAmount: recurringInfo.averageAmount,
+            estimatedMonthlyCost: recurringInfo.estimatedMonthlyCost,
+            subscriptionStatus: recurringInfo.subscriptionStatus,
+          }
+        : null,
+      microDebitInfo: microDebitInfo
+        ? {
+            count: microDebitInfo.count,
+            totalAmount: Number(microDebitInfo.totalAmount.toFixed(2)),
+          }
+        : null,
+      isFee: Boolean(bankFeeReason || isKeywordMatch(txn.description)),
+      isMicroDebit: Boolean(debitAmount > 0 && debitAmount <= 5),
+    })
   }
 
-  const hiddenFees = hidden.reduce((sum, txn) => sum + Math.abs(txn.amount), 0)
-  const totalSpent = transactions
-    .filter((txn) => txn.amount < 0)
-    .reduce((sum, txn) => sum + Math.abs(txn.amount), 0)
+  // Legacy Totals
+  const hiddenFees = hidden.reduce((sum, txn) => sum + Math.abs(txn.amount || 0), 0)
+  const totalSpent = safeTransactions
+    .filter((txn) => txn && txn.amount < 0)
+    .reduce((sum, txn) => sum + Math.abs(txn.amount || 0), 0)
   const transparentSpending = transparent
-    .filter((txn) => txn.amount < 0)
-    .reduce((sum, txn) => sum + Math.abs(txn.amount), 0)
+    .filter((txn) => txn && txn.amount < 0)
+    .reduce((sum, txn) => sum + Math.abs(txn.amount || 0), 0)
 
+  // Legacy Hidden Merchant Stats
   const hiddenMerchantTotals = hidden.reduce((acc, txn) => {
     const key = normalizeMerchant(txn.description) || 'unknown merchant'
 
@@ -181,7 +233,7 @@ function analyzeTransactions(transactions) {
       acc[key] = { merchant: key, total: 0, count: 0 }
     }
 
-    acc[key].total += Math.abs(txn.amount)
+    acc[key].total += Math.abs(txn.amount || 0)
     acc[key].count += 1
     return acc
   }, {})
@@ -195,11 +247,12 @@ function analyzeTransactions(transactions) {
     }))
     .sort((a, b) => b.total - a.total)
 
-  const spendingTotals = transactions
-    .filter((txn) => txn.amount < 0)
+  // Legacy Spending by Merchant
+  const spendingTotals = safeTransactions
+    .filter((txn) => txn && txn.amount < 0)
     .reduce((acc, txn) => {
       const key = normalizeMerchant(txn.description) || 'unknown merchant'
-      acc[key] = (acc[key] || 0) + Math.abs(txn.amount)
+      acc[key] = (acc[key] || 0) + Math.abs(txn.amount || 0)
       return acc
     }, {})
 
@@ -212,9 +265,10 @@ function analyzeTransactions(transactions) {
     .sort((a, b) => b.total - a.total)
     .slice(0, 10)
 
+  // Legacy Wall of Shame
   const merchantTotals = hidden.reduce((acc, txn) => {
     const key = normalizeMerchant(txn.description) || 'unknown merchant'
-    acc[key] = (acc[key] || 0) + Math.abs(txn.amount)
+    acc[key] = (acc[key] || 0) + Math.abs(txn.amount || 0)
     return acc
   }, {})
 
@@ -226,9 +280,10 @@ function analyzeTransactions(transactions) {
     .sort((a, b) => b.total - a.total)
     .slice(0, 8)
 
+  // Legacy Monthly Trend
   const monthTotals = hidden.reduce((acc, txn) => {
     const month = toMonthKey(txn.date)
-    acc[month] = (acc[month] || 0) + Math.abs(txn.amount)
+    acc[month] = (acc[month] || 0) + Math.abs(txn.amount || 0)
     return acc
   }, {})
 
@@ -247,7 +302,7 @@ function analyzeTransactions(transactions) {
   )
 
   const microDebitMerchantMap = hidden.reduce((acc, txn) => {
-    const debitAmount = Math.abs(txn.amount)
+    const debitAmount = Math.abs(txn.amount || 0)
     if (debitAmount > 5) {
       return acc
     }
@@ -331,21 +386,86 @@ function analyzeTransactions(transactions) {
     }
   }
 
+  // Category Breakdown Aggregation
+  const categoryTotals = safeTransactions
+    .filter((txn) => txn && txn.amount < 0)
+    .reduce((acc, txn) => {
+      const cat = categorizeTransaction(txn.description, normalizeMerchant(txn.description))
+      if (!acc[cat]) {
+        acc[cat] = { category: cat, total: 0, count: 0 }
+      }
+      acc[cat].total += Math.abs(txn.amount || 0)
+      acc[cat].count += 1
+      return acc
+    }, {})
+
+  const categories = Object.values(categoryTotals)
+    .map((entry) => ({
+      category: entry.category,
+      total: Number(entry.total.toFixed(2)),
+      count: entry.count,
+      share: totalSpent > 0 ? Number(((entry.total / totalSpent) * 100).toFixed(1)) : 0,
+    }))
+    .sort((a, b) => b.total - a.total)
+
+  // Subscriptions Filter
+  const subscriptions = recurringPayments.filter(
+    (rp) =>
+      rp.subscriptionStatus === 'likely_subscription' ||
+      rp.subscriptionStatus === 'possible_subscription'
+  )
+
+  // Risk Summary
+  const riskScores = transactionInsights.map((t) => t.riskScore)
+  const lowRiskCount = transactionInsights.filter((t) => t.riskLevel === 'LOW').length
+  const mediumRiskCount = transactionInsights.filter((t) => t.riskLevel === 'MEDIUM').length
+  const highRiskCount = transactionInsights.filter((t) => t.riskLevel === 'HIGH').length
+  const avgRiskScore =
+    riskScores.length > 0
+      ? Number((riskScores.reduce((sum, s) => sum + s, 0) / riskScores.length).toFixed(1))
+      : 0
+
+  let overallRiskLevel = 'LOW'
+  if (highRiskCount > 0 || avgRiskScore >= 50) {
+    overallRiskLevel = 'HIGH'
+  } else if (mediumRiskCount > 0 || avgRiskScore >= 25) {
+    overallRiskLevel = 'MEDIUM'
+  }
+
+  const riskSummary = {
+    averageRiskScore: avgRiskScore,
+    overallRiskLevel,
+    lowCount: lowRiskCount,
+    mediumCount: mediumRiskCount,
+    highCount: highRiskCount,
+    highestRiskTransactions: [...transactionInsights]
+      .sort((a, b) => b.riskScore - a.riskScore)
+      .slice(0, 5),
+  }
+
+  // Potential Savings Estimation
+  const potentialSavings = calculatePotentialSavings({
+    transactions: safeTransactions,
+    transactionInsights,
+  })
+
   return {
+    // 100% Backward Compatible Core Fields
     totals: {
       totalSpent: Number(totalSpent.toFixed(2)),
       recoverableFees: Number(hiddenFees.toFixed(2)),
       hiddenFees: Number(hiddenFees.toFixed(2)),
       transparentSpending: Number(transparentSpending.toFixed(2)),
       flaggedTransactions: hidden.length,
-      scannedTransactions: transactions.length,
+      scannedTransactions: safeTransactions.length,
     },
     spendingByMerchant,
     wallOfShame: byMerchant,
     monthlyTrend,
     insights: {
       topFeeSource,
-      averageHiddenFeePerTransaction: hidden.length > 0 ? Number((hiddenFees / hidden.length).toFixed(2)) : 0,
+      averageHiddenFeePerTransaction:
+        hidden.length > 0 ? Number((hiddenFees / hidden.length).toFixed(2)) : 0,
       repeatOffenderMerchants: repeatOffenderMerchants.length,
       repeatOffenderMerchantList: repeatOffenderMerchants.slice(0, 3),
       feeConcentrationPercentage: topFeeSource?.share || 0,
@@ -364,7 +484,21 @@ function analyzeTransactions(transactions) {
       calendarEnd: timeline.calendarEnd,
       maxDailyHiddenFee: timeline.maxDailyHiddenFee,
     },
+
+    // Phase 2 Financial Intelligence Fields (Additive)
+    transactionInsights,
+    recurringPayments,
+    subscriptions,
+    categories,
+    riskSummary,
+    potentialSavings,
   }
 }
 
-module.exports = { analyzeTransactions }
+module.exports = {
+  analyzeTransactions,
+  normalizeMerchant,
+  toMonthKey,
+  toDateKey,
+  buildHiddenTimeline,
+}

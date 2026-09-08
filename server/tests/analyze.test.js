@@ -49,6 +49,19 @@ describe('Envy API', () => {
     expect(Array.isArray(response.body.timeline.dailyHiddenFees)).toBe(true)
     expect(response.body.timeline.calendarStart).toBeTruthy()
     expect(response.body.timeline.calendarEnd).toBeTruthy()
+
+    // Phase 2 Financial Intelligence fields
+    expect(Array.isArray(response.body.transactionInsights)).toBe(true)
+    expect(response.body.transactionInsights.length).toBeGreaterThan(0)
+    expect(response.body.transactionInsights[0]).toHaveProperty('classification')
+    expect(response.body.transactionInsights[0]).toHaveProperty('riskScore')
+    expect(response.body.transactionInsights[0]).toHaveProperty('confidence')
+    expect(response.body.transactionInsights[0]).toHaveProperty('reasons')
+    expect(Array.isArray(response.body.categories)).toBe(true)
+    expect(Array.isArray(response.body.recurringPayments)).toBe(true)
+    expect(response.body.riskSummary).toHaveProperty('averageRiskScore')
+    expect(response.body.potentialSavings).toHaveProperty('monthlyEstimate')
+    expect(response.body.potentialSavings).toHaveProperty('disclaimer')
   })
 
   it('rejects unsupported file types', async () => {
@@ -88,5 +101,64 @@ describe('Envy API', () => {
     expect(loginResponse.statusCode).toBe(200)
     expect(loginResponse.body.token).toBeTruthy()
     expect(loginResponse.body.user.email).toBe(email)
+  })
+
+  it('rejects registration with invalid email or short password', async () => {
+    const invalidEmailRes = await request(app).post('/api/auth/register').send({
+      name: 'Bad Email User',
+      email: 'not-an-email',
+      password: 'StrongPass123!',
+    })
+    expect(invalidEmailRes.statusCode).toBe(400)
+    expect(invalidEmailRes.body.error).toMatch(/valid email/i)
+
+    const shortPassRes = await request(app).post('/api/auth/register').send({
+      name: 'Short Pass User',
+      email: `valid_${Date.now()}@envy.dev`,
+      password: '123',
+    })
+    expect(shortPassRes.statusCode).toBe(400)
+    expect(shortPassRes.body.error).toMatch(/at least 8 characters/i)
+  })
+
+  it('rejects access to /api/auth/me without token or with tampered token', async () => {
+    const noTokenRes = await request(app).get('/api/auth/me')
+    expect(noTokenRes.statusCode).toBe(401)
+    expect(noTokenRes.body.error).toMatch(/Authentication required/i)
+
+    const badTokenRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer invalid.tampered.token')
+    expect(badTokenRes.statusCode).toBe(401)
+    expect(badTokenRes.body.error).toMatch(/Session is invalid or expired/i)
+  })
+
+  it('returns current user on /api/auth/me with valid token', async () => {
+    const email = `me_${Date.now()}@envy.dev`
+    const registerRes = await request(app).post('/api/auth/register').send({
+      name: 'Me User',
+      email,
+      password: 'StrongPass123!',
+    })
+    const token = registerRes.body.token
+
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(meRes.statusCode).toBe(200)
+    expect(meRes.body.user.email).toBe(email)
+    expect(meRes.body.user.name).toBe('Me User')
+  })
+
+  it('rejects empty file upload on /api/analyze', async () => {
+    const token = await registerAndGetToken()
+    const emptyRes = await request(app)
+      .post('/api/analyze')
+      .set('Authorization', `Bearer ${token}`)
+      .attach('statement', Buffer.from(''), 'empty.csv')
+
+    expect(emptyRes.statusCode).toBe(400)
+    expect(emptyRes.body.error).toMatch(/No transactions found/i)
   })
 })

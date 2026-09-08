@@ -2,6 +2,16 @@ import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { motion } from 'framer-motion'
 
+import FinancialOverview from './components/FinancialOverview.jsx'
+import RiskOverview from './components/RiskOverview.jsx'
+import RecurringPayments from './components/RecurringPayments.jsx'
+import CategoryBreakdown from './components/CategoryBreakdown.jsx'
+import TransactionTable from './components/TransactionTable.jsx'
+import TransactionDetailsModal from './components/TransactionDetailsModal.jsx'
+import FinancialInsights from './components/FinancialInsights.jsx'
+import PotentialSavings from './components/PotentialSavings.jsx'
+import { formatCurrency, formatPercent } from './utils/formatters.js'
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 const ReportCharts = lazy(() => import('./components/ReportCharts.jsx'))
 const AUTH_STORAGE_KEY = 'envy-auth-user'
@@ -28,7 +38,6 @@ function getInitialAnomalyFilter() {
 function App() {
   const MotionHeader = motion.header
   const MotionSection = motion.section
-  const MotionArticle = motion.article
 
   const [currentUser, setCurrentUser] = useState(null)
   const [authToken, setAuthToken] = useState('')
@@ -40,6 +49,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState('')
   const [activeAnomalyFilter, setActiveAnomalyFilter] = useState(getInitialAnomalyFilter)
+  const [selectedTransaction, setSelectedTransaction] = useState(null)
 
   useEffect(() => {
     const storedSession = window.localStorage.getItem(AUTH_STORAGE_KEY)
@@ -81,8 +91,6 @@ function App() {
   }, [activeAnomalyFilter])
 
   const totalSpent = report?.totals?.totalSpent || 0
-  const topMerchant = report?.spendingByMerchant?.[0] || null
-  const insights = report?.insights || {}
   const anomalies = report?.anomalies || {}
   const suspiciousActivities = useMemo(
     () => anomalies.suspiciousActivities || [],
@@ -120,58 +128,13 @@ function App() {
     ]
   }, [suspiciousActivities])
 
-  const suspiciousMerchantMap = useMemo(() => {
-    const severityRank = { low: 1, medium: 2, high: 3 }
-
-    return suspiciousActivities.reduce((acc, activity) => {
-      if (!activity.merchant) {
-        return acc
-      }
-
-      const current = acc[activity.merchant]
-      if (!current || severityRank[activity.severity] > severityRank[current.severity]) {
-        acc[activity.merchant] = {
-          merchant: activity.merchant,
-          badge: activity.badge,
-          severity: activity.severity,
-          type: activity.type,
-        }
-      }
-
-      return acc
-    }, {})
-  }, [suspiciousActivities])
-
-  const filteredSuspiciousMerchantMap = useMemo(
-    () =>
-      Object.values(suspiciousMerchantMap).reduce((acc, entry) => {
-        if (activeAnomalyFilter === 'all' || entry.type === activeAnomalyFilter) {
-          acc[entry.merchant] = entry
-        }
-        return acc
-      }, {}),
-    [activeAnomalyFilter, suspiciousMerchantMap]
-  )
-
   const filteredSpendingByMerchant = useMemo(() => {
-    const merchants = report?.spendingByMerchant || []
-
-    if (activeAnomalyFilter === 'all') {
-      return merchants
-    }
-
-    return merchants.filter((entry) => filteredSuspiciousMerchantMap[entry.merchant])
-  }, [activeAnomalyFilter, filteredSuspiciousMerchantMap, report?.spendingByMerchant])
+    return report?.spendingByMerchant || []
+  }, [report?.spendingByMerchant])
 
   const filteredWallOfShame = useMemo(() => {
-    const merchants = report?.wallOfShame || []
-
-    if (activeAnomalyFilter === 'all') {
-      return merchants
-    }
-
-    return merchants.filter((entry) => filteredSuspiciousMerchantMap[entry.merchant])
-  }, [activeAnomalyFilter, filteredSuspiciousMerchantMap, report?.wallOfShame])
+    return report?.wallOfShame || []
+  }, [report?.wallOfShame])
 
   const timelineDaysForView = useMemo(() => {
     return timelineDays.map((day) => {
@@ -223,52 +186,36 @@ function App() {
       .sort((a, b) => a.month.localeCompare(b.month))
   }, [timelineDaysForView])
 
-  const activeFilterLabel = useMemo(
-    () =>
-      suspiciousFilterOptions.find((option) => option.key === activeAnomalyFilter)?.label ||
-      'All Signals',
-    [activeAnomalyFilter, suspiciousFilterOptions]
-  )
-
-  const formatCurrency = (value) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      maximumFractionDigits: 2,
-    }).format(value || 0)
-
-  const formatPercent = (value) => `${Number(value || 0).toFixed(1)}%`
-
   const severityClass = (severity) => {
     if (severity === 'high') {
-      return 'bg-rose-500/20 text-rose-200 border-rose-300/40'
+      return 'bg-rose-50 text-rose-700 border-rose-200'
     }
 
     if (severity === 'medium') {
-      return 'bg-amber-500/20 text-amber-200 border-amber-300/40'
+      return 'bg-amber-50 text-amber-800 border-amber-200'
     }
 
-    return 'bg-cyan-500/20 text-cyan-100 border-cyan-300/40'
+    return 'bg-blue-50 text-blue-700 border-blue-200'
   }
 
   const heatmapLevelClass = (level) => {
     if (level >= 4) {
-      return 'bg-rose-300/80 border-rose-100/60'
+      return 'bg-rose-200 border-rose-300'
     }
 
     if (level === 3) {
-      return 'bg-rose-300/60 border-rose-100/40'
+      return 'bg-rose-100 border-rose-200'
     }
 
     if (level === 2) {
-      return 'bg-amber-300/45 border-amber-100/40'
+      return 'bg-amber-100 border-amber-200'
     }
 
     if (level === 1) {
-      return 'bg-cyan-300/35 border-cyan-100/35'
+      return 'bg-sky-100 border-sky-200'
     }
 
-    return 'bg-slate-900/40 border-white/10'
+    return 'bg-slate-100 border-slate-200'
   }
 
   const handleAuthSubmit = async (event) => {
@@ -332,6 +279,7 @@ function App() {
     setAuthError('')
     setAuthSuccess('')
     setActiveAnomalyFilter('all')
+    setSelectedTransaction(null)
   }
 
   const chartData = useMemo(() => {
@@ -380,7 +328,7 @@ function App() {
       }
 
       if (!response.ok) {
-        throw new Error(data.error || 'Analysis failed')
+        throw new Error(data.error || 'Analysis failed. Please check file format.')
       }
 
       setReport(data)
@@ -403,7 +351,7 @@ function App() {
     const message =
       errors?.[0]?.code === 'file-too-large'
         ? 'File is too large. Maximum size is 10MB.'
-        : 'Unsupported file. Please upload a CSV or PDF file.'
+        : 'Unsupported file format. Please upload a CSV or PDF file.'
 
     setError(message)
   }
@@ -419,55 +367,53 @@ function App() {
     },
     maxSize: 10 * 1024 * 1024,
     multiple: false,
+    disabled: isUploading,
   })
 
+  // Unauthenticated Landing Page
   if (!currentUser) {
     return (
-      <div className="relative min-h-screen overflow-hidden bg-(--bg-deep) px-4 py-8 text-slate-100 sm:px-7 lg:px-12">
-        <div className="pointer-events-none absolute -top-24 left-0 h-72 w-72 rounded-full bg-(--accent-cyan)/20 blur-[130px]" />
-        <div className="pointer-events-none absolute right-0 top-1/3 h-80 w-80 rounded-full bg-(--accent-amber)/20 blur-[150px]" />
-        <div className="pointer-events-none absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-emerald-400/10 blur-[130px]" />
-
-        <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl items-center gap-6 lg:grid-cols-12">
+      <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-7 lg:px-12">
+        <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl items-center gap-8 lg:grid-cols-12">
           <MotionHeader
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={{ duration: 0.5 }}
             className="lg:col-span-7"
           >
-            <p className="inline-flex rounded-full border border-white/20 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
-              Envy
-            </p>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl">
-              Track hidden fees with a sharper home page.
+            <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-blue-700">
+              Envy Financial Intelligence
+            </span>
+            <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-6xl">
+              Track hidden fees with precision intelligence.
             </h1>
-            <p className="mt-4 max-w-2xl text-sm text-slate-300/90 sm:text-base">
-              Sign in or register to upload statements, review fee patterns, and see where money slips away.
+            <p className="mt-4 max-w-2xl text-base text-slate-600 leading-relaxed">
+              Sign in or register to upload bank statements, review explainable fee patterns, audit recurring subscriptions, and uncover potential savings.
             </p>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Private by design</p>
-                <p className="mt-2 text-sm text-slate-200">Statement files are analyzed in memory only.</p>
+            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Private by design</p>
+                <p className="mt-1.5 text-sm text-slate-700">Statement files are processed in memory only.</p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Fast insights</p>
-                <p className="mt-2 text-sm text-slate-200">Spot fee concentration, repeat offenders, and monthly trends.</p>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Explainable Scores</p>
+                <p className="mt-1.5 text-sm text-slate-700">Deterministic risk scoring and structured reasons for every flagged item.</p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">One place</p>
-                <p className="mt-2 text-sm text-slate-200">Login, register, and analyze from a single dashboard.</p>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Recurring & Savings</p>
+                <p className="mt-1.5 text-sm text-slate-700">Automatic multi-cadence stream mapping and savings estimation.</p>
               </div>
             </div>
           </MotionHeader>
 
           <MotionSection
-            initial={{ opacity: 0, y: 22 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.08 }}
-            className="glass-panel lg:col-span-5"
+            transition={{ duration: 0.5, delay: 0.08 }}
+            className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md lg:col-span-5"
           >
-            <div className="flex rounded-2xl border border-white/10 bg-slate-950/45 p-1">
+            <div className="flex rounded-xl border border-slate-200 bg-slate-100 p-1">
               <button
                 type="button"
                 onClick={() => {
@@ -475,13 +421,13 @@ function App() {
                   setAuthError('')
                   setAuthSuccess('')
                 }}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition ${
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-bold transition ${
                   authMode === 'login'
-                    ? 'bg-white text-slate-950'
-                    : 'text-slate-300 hover:text-white'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Login
+                Sign In
               </button>
               <button
                 type="button"
@@ -490,10 +436,10 @@ function App() {
                   setAuthError('')
                   setAuthSuccess('')
                 }}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-medium transition ${
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-bold transition ${
                   authMode === 'register'
-                    ? 'bg-white text-slate-950'
-                    : 'text-slate-300 hover:text-white'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Register
@@ -503,52 +449,66 @@ function App() {
             <form className="mt-5 space-y-4" onSubmit={handleAuthSubmit}>
               {authMode === 'register' && (
                 <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Full name</span>
+                  <span className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Full Name
+                  </span>
                   <input
                     value={authForm.name}
                     onChange={(event) => setAuthForm((previous) => ({ ...previous, name: event.target.value }))}
-                    className="w-full rounded-2xl border border-white/10 bg-slate-950/55 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-(--accent-cyan)"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
                     placeholder="Enter your name"
                   />
                 </label>
               )}
 
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-300">Email</span>
+                <span className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Email Address
+                </span>
                 <input
                   type="email"
                   value={authForm.email}
                   onChange={(event) => setAuthForm((previous) => ({ ...previous, email: event.target.value }))}
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/55 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-(--accent-cyan)"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
                   placeholder="name@company.com"
                 />
               </label>
 
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-300">Password</span>
+                <span className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Password
+                </span>
                 <input
                   type="password"
                   value={authForm.password}
                   onChange={(event) => setAuthForm((previous) => ({ ...previous, password: event.target.value }))}
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/55 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-(--accent-cyan)"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
                   placeholder="Enter your password"
                 />
               </label>
 
-              {authError && <p className="text-sm text-rose-300">{authError}</p>}
-              {authSuccess && <p className="text-sm text-emerald-300">{authSuccess}</p>}
+              {authError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">
+                  {authError}
+                </div>
+              )}
+              {authSuccess && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-700">
+                  {authSuccess}
+                </div>
+              )}
 
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-linear-to-r from-(--accent-cyan) to-(--accent-amber) px-4 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95"
+                className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 shadow-xs"
               >
-                {authMode === 'login' ? 'Login to Envy' : 'Create Account'}
+                {authMode === 'login' ? 'Sign In to Envy' : 'Create Account'}
               </button>
 
-              <p className="text-xs leading-5 text-slate-400">
+              <p className="text-xs leading-5 text-slate-500 text-center">
                 {authMode === 'login'
-                  ? 'Sign in with your Envy account to analyze statements.'
-                  : 'Register a secure account. Passwords are hashed server-side.'}
+                  ? 'Sign in to access your statement intelligence dashboard.'
+                  : 'Register a secure account. Passwords are encrypted server-side.'}
               </p>
             </form>
           </MotionSection>
@@ -557,235 +517,197 @@ function App() {
     )
   }
 
+  // Authenticated Main Dashboard
   return (
-    <div className="relative min-h-screen overflow-hidden bg-(--bg-deep) px-4 py-8 text-slate-100 sm:px-7 lg:px-12">
-      <div className="pointer-events-none absolute -top-24 left-0 h-72 w-72 rounded-full bg-(--accent-cyan)/20 blur-[130px]" />
-      <div className="pointer-events-none absolute right-0 top-1/3 h-80 w-80 rounded-full bg-(--accent-amber)/20 blur-[150px]" />
-      <div className="pointer-events-none absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-emerald-400/10 blur-[130px]" />
-
+    <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 sm:px-7 lg:px-12">
+      {/* Top Header */}
       <MotionHeader
-        initial={{ opacity: 0, y: 16 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="mx-auto mb-7 flex max-w-7xl items-center justify-between gap-4"
+        transition={{ duration: 0.4 }}
+        className="mx-auto mb-6 flex max-w-7xl items-center justify-between gap-4 border-b border-slate-200 bg-white p-4 rounded-2xl shadow-xs"
       >
         <div>
-          <p className="inline-flex rounded-full border border-white/20 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
-            Envy
-          </p>
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-            Professional fee intelligence for your statement spend.
+          <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-0.5 text-xs font-bold uppercase tracking-wider text-blue-700">
+            Envy Intelligence
+          </span>
+          <h1 className="mt-1.5 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+            Financial Intelligence & Fee Audit
           </h1>
-          <p className="mt-3 max-w-3xl text-sm text-slate-300/90 sm:text-base">
-            Your statement is analyzed in memory. We do not store account numbers,
-            card numbers, addresses, or personally identifiable transaction details.
-          </p>
         </div>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/30 hover:bg-white/10"
-        >
-          Sign out
-        </button>
+
+        <div className="flex items-center gap-3">
+          <span className="hidden sm:inline-block text-xs font-medium text-slate-500">
+            Signed in as <strong className="text-slate-900">{currentUser.email}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-100"
+          >
+            Sign out
+          </button>
+        </div>
       </MotionHeader>
 
-      <main className="mx-auto grid max-w-7xl gap-5 lg:grid-cols-12">
-        {activeAnomalyFilter !== 'all' && (
-          <section className="glass-panel lg:col-span-12">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-slate-200">
-                Active suspicious filter: <span className="font-semibold text-white">{activeFilterLabel}</span>
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveAnomalyFilter('all')}
-                className="rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.12em] text-slate-100 transition hover:border-white/45"
-              >
-                Clear Filter
-              </button>
+      <main className="mx-auto max-w-7xl space-y-6">
+        {/* Upload & Statement Overview Section */}
+        <div className="grid gap-6 lg:grid-cols-12 items-start">
+          {/* Uploader Card */}
+          <MotionSection
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="white-card bg-white lg:col-span-4"
+          >
+            <h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+              Upload Statement
+            </h2>
+            <div
+              {...getRootProps()}
+              className={`mt-3.5 rounded-xl border-2 border-dashed p-6 text-center transition-all cursor-pointer ${
+                isDragActive
+                  ? 'border-blue-500 bg-blue-50/50'
+                  : 'border-slate-300 bg-slate-50/70 hover:border-slate-400 hover:bg-slate-50'
+              } ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+              <input {...getInputProps()} />
+              {isUploading ? (
+                <div className="flex flex-col items-center justify-center py-2">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                  <p className="mt-2 text-xs font-bold text-blue-700">
+                    Running Financial Intelligence Engine...
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">
+                    Drag & drop bank statement (CSV/PDF) or click to browse
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Supported: .csv, .pdf | Max size: 10MB
+                  </p>
+                </>
+              )}
             </div>
-          </section>
+
+            {error && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">
+                {error}
+              </div>
+            )}
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs text-slate-600">
+              <p className="font-bold text-slate-800">Detection Capabilities:</p>
+              <p className="mt-1 leading-relaxed text-slate-500">
+                Identifies bank service charges, ATM surcharges, multi-cadence recurring streams, subscription tags, micro-debits, and statistical outlier risk scoring.
+              </p>
+            </div>
+          </MotionSection>
+
+          {/* Top-Level Financial Overview Card */}
+          <div className="lg:col-span-8">
+            <FinancialOverview
+              totals={report?.totals}
+              recurringPayments={report?.recurringPayments}
+            />
+          </div>
+        </div>
+
+        {/* Phase 2 Intelligence: Risk Overview & Potential Savings Grid */}
+        {report && (
+          <div className="grid gap-6 lg:grid-cols-12 items-start">
+            <div className="lg:col-span-7">
+              <RiskOverview
+                riskSummary={report.riskSummary}
+                onSelectTransaction={setSelectedTransaction}
+              />
+            </div>
+            <div className="lg:col-span-5">
+              <PotentialSavings potentialSavings={report.potentialSavings} />
+            </div>
+          </div>
         )}
 
-        <MotionSection
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.08 }}
-          className="glass-panel lg:col-span-4"
-        >
-          <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">
-            Upload Statement
-          </h2>
-          <div
-            {...getRootProps()}
-            className={`mt-4 rounded-2xl border border-dashed p-6 text-center transition-all duration-300 ${
-              isDragActive
-                    ? 'border-(--accent-cyan)/90 bg-(--accent-cyan)/10'
-                : 'border-slate-600/80 bg-slate-900/35 hover:border-slate-400/70'
-            }`}
-          >
-            <input {...getInputProps()} />
-            <p className="text-sm text-slate-100">
-              Drag and drop CSV/PDF here, or click to upload.
-            </p>
-            <p className="mt-2 text-xs text-slate-400">
-              Supported formats: .csv, .pdf | Max size: 10MB
-            </p>
-          </div>
+        {/* Financial Insights Highlights */}
+        {report && (
+          <FinancialInsights
+            insights={report.insights}
+            categories={report.categories}
+            recurringPayments={report.recurringPayments}
+            anomalies={report.anomalies}
+            totals={report.totals}
+          />
+        )}
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/45 p-4 text-sm text-slate-300">
-            <p className="font-medium text-slate-100">Detection logic includes:</p>
-            <p className="mt-2">
-              Convenience Fee, Service Charge, Surcharge, Processing Fee,
-              Maintenance, and recurring micro-debits.
-            </p>
-          </div>
-
-          {isUploading && (
-            <p className="mt-4 text-sm text-(--accent-cyan)">Analyzing statement...</p>
-          )}
-          {error && <p className="mt-4 text-sm text-rose-300">{error}</p>}
-
-          <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Statement Spend</p>
-            <p className="mt-2 text-3xl font-semibold text-white">{formatCurrency(totalSpent)}</p>
-            <p className="mt-2 text-xs text-slate-400">
-              {topMerchant
-                ? `Highest spend at ${topMerchant.merchant} (${formatCurrency(topMerchant.total)}).`
-                : 'Upload a statement to view spending insights.'}
-            </p>
-          </div>
-        </MotionSection>
-
-        <MotionSection
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.14 }}
-          className="glass-panel lg:col-span-8"
-        >
-          <div className="rounded-2xl border border-white/10 bg-linear-to-br from-slate-900/80 to-slate-950/50 p-5">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Executive Summary</p>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Total Spent</p>
-                <p className="mt-3 text-2xl font-semibold text-white">{formatCurrency(totalSpent)}</p>
-              </article>
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Recoverable Fees</p>
-                <p className="mt-3 text-2xl font-semibold text-(--accent-cyan)">
-                  {formatCurrency(report ? report.totals.recoverableFees : 0)}
-                </p>
-              </article>
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Hidden Fees</p>
-                <p className="mt-3 text-2xl font-semibold text-rose-300">
-                  {formatCurrency(report ? report.totals.hiddenFees : 0)}
-                </p>
-              </article>
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Transactions Scanned</p>
-                <p className="mt-3 text-2xl font-semibold text-white">
-                  {report ? report.totals.scannedTransactions : 0}
-                </p>
-              </article>
+        {/* Recurring Payments & Category Breakdown Grid */}
+        {report && (
+          <div className="grid gap-6 lg:grid-cols-12 items-start">
+            <div className="lg:col-span-6">
+              <RecurringPayments recurringPayments={report.recurringPayments} />
+            </div>
+            <div className="lg:col-span-6">
+              <CategoryBreakdown categories={report.categories} />
             </div>
           </div>
+        )}
 
-          <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        {/* Core Charts (Transparent vs Hidden & Monthly Trend) */}
+        {report && (
+          <div className="grid gap-6 lg:grid-cols-2">
             <Suspense
               fallback={
-                <div className="xl:col-span-2 rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-300">
+                <div className="rounded-xl border border-slate-200 bg-white p-6 text-xs text-slate-500">
                   Loading charts...
                 </div>
               }
             >
-              <ReportCharts chartData={chartData} monthlyTrend={report?.monthlyTrend || []} />
+              <ReportCharts
+                chartData={chartData}
+                monthlyTrend={report?.monthlyTrend || []}
+              />
             </Suspense>
           </div>
+        )}
 
-          <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/45 p-5">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Richer Insights</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Top Fee Source</p>
-                <p className="mt-3 text-lg font-semibold capitalize text-white">
-                  {insights.topFeeSource?.merchant || 'No data yet'}
-                </p>
-                <p className="mt-2 text-sm text-slate-300">
-                  {formatCurrency(insights.topFeeSource?.total || 0)} across{' '}
-                  {insights.topFeeSource?.count || 0} fee transactions
-                </p>
-              </article>
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                  Avg Hidden Fee / Transaction
-                </p>
-                <p className="mt-3 text-2xl font-semibold text-(--accent-cyan)">
-                  {formatCurrency(insights.averageHiddenFeePerTransaction || 0)}
-                </p>
-                <p className="mt-2 text-sm text-slate-300">
-                  Based on {report?.totals?.flaggedTransactions || 0} flagged transactions
-                </p>
-              </article>
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                  Repeat Offenders
-                </p>
-                <p className="mt-3 text-2xl font-semibold text-amber-300">
-                  {insights.repeatOffenderMerchants || 0}
-                </p>
-                <p className="mt-2 text-sm text-slate-300">
-                  Merchants hit 2+ times in the same statement
-                </p>
-              </article>
-              <article className="rounded-xl border border-white/10 bg-slate-900/55 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                  Fee Concentration
-                </p>
-                <p className="mt-3 text-2xl font-semibold text-rose-300">
-                  {formatPercent(insights.feeConcentrationPercentage || 0)}
-                </p>
-                <p className="mt-2 text-sm text-slate-300">
-                  Share of hidden fees coming from the largest source
-                </p>
-              </article>
-            </div>
+        {/* Interactive Transaction Intelligence Table */}
+        {report && (
+          <TransactionTable
+            transactions={report.transactionInsights}
+            onSelectTransaction={setSelectedTransaction}
+          />
+        )}
 
-            <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/45 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                Repeat Offender Merchants
-              </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                {(insights.repeatOffenderMerchantList || []).length === 0 && (
-                  <div className="rounded-lg border border-white/10 bg-slate-950/35 p-3 text-sm text-slate-300 sm:col-span-3">
-                    No merchant appeared enough times to be flagged as a repeat offender yet.
-                  </div>
-                )}
-                {(insights.repeatOffenderMerchantList || []).map((entry) => (
-                  <div key={entry.merchant} className="rounded-lg border border-white/10 bg-slate-950/35 p-3">
-                    <p className="text-sm font-medium capitalize text-white">{entry.merchant}</p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      {entry.count} transactions | {formatCurrency(entry.total)} |{' '}
-                      {formatPercent(entry.share)} of hidden fees
-                    </p>
-                  </div>
-                ))}
+        {/* Suspicious Activity Anomaly Filter Signals */}
+        {report && (
+          <MotionSection
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="white-card bg-white"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                  Anomaly Filter & Heatmap
+                </p>
+                <h2 className="mt-0.5 text-lg font-bold text-slate-900">
+                  Suspicious Activity Signals ({suspiciousActivities.length})
+                </h2>
               </div>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/45 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Suspicious Activity</p>
               <div className="flex flex-wrap gap-2 text-[11px]">
-                <span className="rounded-full border border-rose-300/40 bg-rose-500/15 px-2.5 py-1 text-rose-200">
+                <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 font-semibold text-rose-700">
                   Spikes: {anomalies.unusualSpikeMerchantCount || 0}
                 </span>
-                <span className="rounded-full border border-amber-300/40 bg-amber-500/15 px-2.5 py-1 text-amber-200">
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 font-semibold text-amber-800">
                   Micro-debits: {anomalies.repeatedMicroDebitMerchants || 0}
                 </span>
-                <span className="rounded-full border border-cyan-300/40 bg-cyan-500/15 px-2.5 py-1 text-cyan-100">
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 font-semibold text-blue-700">
                   New merchants: {anomalies.newMerchantCount || 0}
                 </span>
               </div>
@@ -797,10 +719,10 @@ function App() {
                   key={option.key}
                   type="button"
                   onClick={() => setActiveAnomalyFilter(option.key)}
-                  className={`rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] transition ${
+                  className={`rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition ${
                     activeAnomalyFilter === option.key
-                      ? 'border-white/50 bg-white/20 text-white'
-                      : 'border-white/20 bg-white/5 text-slate-300 hover:border-white/35'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   {option.label} ({option.count})
@@ -810,215 +732,175 @@ function App() {
                 <button
                   type="button"
                   onClick={() => setActiveAnomalyFilter('all')}
-                  className="rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-slate-100 transition hover:border-white/45"
+                  className="rounded-full border border-slate-300 bg-slate-100 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 hover:bg-slate-200 transition"
                 >
-                  Clear
+                  Clear Filter
                 </button>
               )}
             </div>
 
-            <div className="mt-4 grid gap-3">
-              {filteredSuspiciousActivities.length === 0 && (
-                <div className="rounded-xl border border-white/10 bg-slate-950/35 p-4 text-sm text-slate-300">
-                  No suspicious activity matches this filter.
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredSuspiciousActivities.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 sm:col-span-3">
+                  No suspicious activity matching this filter.
                 </div>
-              )}
-
-              {filteredSuspiciousActivities.map((activity, index) => (
-                <div
-                  key={`${activity.type}-${activity.merchant || activity.date || index}`}
-                  className="rounded-xl border border-white/10 bg-slate-900/45 p-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm font-medium capitalize text-slate-100">
-                      {activity.merchant || activity.date || 'System signal'}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setActiveAnomalyFilter(activity.type)}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] ${severityClass(
-                        activity.severity
-                      )}`}
-                    >
-                      {activity.badge}
-                    </button>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-300">{activity.message}</p>
-                  <p className="mt-2 text-xs text-slate-400">
-                    Amount: {formatCurrency(activity.amount || 0)} | Transactions:{' '}
-                    {activity.count || 0}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </MotionSection>
-
-        <MotionSection
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.18 }}
-          className="glass-panel lg:col-span-12"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-              Hidden Fee Timeline Heatmap
-            </p>
-            <p className="text-xs text-slate-400">
-              {report?.timeline?.calendarStart && report?.timeline?.calendarEnd
-                ? `${report.timeline.calendarStart} to ${report.timeline.calendarEnd}`
-                : 'Upload a statement to generate a timeline'}
-            </p>
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-            <span>Lower</span>
-            {[1, 2, 3, 4].map((level) => (
-              <span
-                key={`legend-${level}`}
-                className={`h-3 w-3 rounded-sm border ${heatmapLevelClass(level)}`}
-              />
-            ))}
-            <span>Higher</span>
-          </div>
-
-          {timelineByMonth.length === 0 && (
-            <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/50 p-4 text-sm text-slate-300">
-              No timeline yet. Upload a statement to see fee-heavy days.
-            </div>
-          )}
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-2">
-            {timelineByMonth.map((monthBlock) => (
-              <article
-                key={monthBlock.month}
-                className="rounded-xl border border-white/10 bg-slate-900/45 p-4"
-              >
-                <p className="text-sm font-medium text-slate-100">{monthBlock.monthLabel}</p>
-                <div className="mt-3 grid grid-cols-7 gap-1.5">
-                  {monthBlock.days.map((day, index) => (
-                    <div
-                      key={day.date}
-                      className={`h-8 rounded-md border ${heatmapLevelClass(day.level)} ${
-                        day.isHeavy ? 'ring-1 ring-rose-300/60' : ''
-                      } ${day.isRelevant ? 'opacity-100' : 'opacity-20'}`}
-                      style={index === 0 ? { gridColumnStart: day.weekday + 1 } : undefined}
-                      title={`${day.date} | ${formatCurrency(day.total)} | ${day.count} flagged`}
-                    >
-                      <span className="sr-only">{day.date}</span>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </MotionSection>
-
-        <MotionSection
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.2 }}
-          className="glass-panel lg:col-span-7"
-        >
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Spending Breakdown
-          </p>
-          <div className="mt-4 space-y-3">
-            {filteredSpendingByMerchant.length === 0 && (
-              <div className="rounded-xl border border-white/10 bg-slate-900/50 p-4 text-sm text-slate-300">
-                {activeAnomalyFilter === 'all'
-                  ? 'Upload a statement to view where your money is spent.'
-                  : 'No merchants match the active suspicious activity filter.'}
-              </div>
-            )}
-            {filteredSpendingByMerchant.map((entry) => (
-              <div
-                key={entry.merchant}
-                className="rounded-xl border border-white/10 bg-slate-900/45 p-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium capitalize text-slate-100">{entry.merchant}</p>
-                    {filteredSuspiciousMerchantMap[entry.merchant] && (
+              ) : (
+                filteredSuspiciousActivities.map((activity, index) => (
+                  <div
+                    key={`${activity.type}-${activity.merchant || activity.date || index}`}
+                    className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold capitalize text-slate-900 truncate">
+                        {activity.merchant || activity.date || 'System signal'}
+                      </p>
                       <button
                         type="button"
-                        onClick={() =>
-                          setActiveAnomalyFilter(filteredSuspiciousMerchantMap[entry.merchant].type)
-                        }
-                        className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] ${severityClass(
-                          filteredSuspiciousMerchantMap[entry.merchant].severity
+                        onClick={() => setActiveAnomalyFilter(activity.type)}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${severityClass(
+                          activity.severity
                         )}`}
                       >
-                        {filteredSuspiciousMerchantMap[entry.merchant].badge}
+                        {activity.badge}
                       </button>
-                    )}
+                    </div>
+                    <p className="mt-1.5 text-xs text-slate-600">{activity.message}</p>
+                    <p className="mt-2 text-[11px] font-medium text-slate-500">
+                      Amount: {formatCurrency(activity.amount || 0)} | {activity.count || 0} occurrences
+                    </p>
                   </div>
-                  <p className="text-sm text-slate-200">{formatCurrency(entry.total)}</p>
-                </div>
-                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-700/60">
-                  <div
-                    className="h-full rounded-full bg-linear-to-r from-(--accent-cyan) to-(--accent-amber)"
-                    style={{ width: `${Math.min(entry.share || 0, 100)}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-xs text-slate-400">{entry.share}% of total spend</p>
-              </div>
-            ))}
-          </div>
-        </MotionSection>
+                ))
+              )}
+            </div>
+          </MotionSection>
+        )}
 
-        <MotionSection
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.26 }}
-          className="glass-panel lg:col-span-5"
-        >
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Wall of Shame
-          </p>
-          <div className="mt-4 grid gap-3">
-            {filteredWallOfShame.length === 0 && (
-              <div className="rounded-xl border border-white/10 bg-slate-900/50 p-4 text-sm text-slate-300">
-                {activeAnomalyFilter === 'all'
-                  ? 'Upload a statement to reveal fee-heavy merchants.'
-                  : 'No wall-of-shame merchants match the active filter.'}
+        {/* Hidden Fee Timeline Heatmap */}
+        {report && (
+          <MotionSection
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="white-card bg-white"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                  Fee Timeline Heatmap
+                </p>
+                <h2 className="mt-0.5 text-lg font-bold text-slate-900">
+                  Daily Fee Concentration
+                </h2>
               </div>
-            )}
-            {filteredWallOfShame.map((entry, index) => (
-              <MotionArticle
-                key={`${entry.merchant}-${index}`}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.08 * index }}
-                className="rounded-xl border border-white/10 bg-slate-900/55 p-4"
-              >
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Merchant
-                </p>
-                <p className="mt-1 text-lg font-medium capitalize text-white">
-                  {entry.merchant}
-                </p>
-                {filteredSuspiciousMerchantMap[entry.merchant] && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveAnomalyFilter(filteredSuspiciousMerchantMap[entry.merchant].type)
-                    }
-                    className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] ${severityClass(
-                      filteredSuspiciousMerchantMap[entry.merchant].severity
-                    )}`}
+              <p className="text-xs font-medium text-slate-500">
+                {report?.timeline?.calendarStart && report?.timeline?.calendarEnd
+                  ? `${report.timeline.calendarStart} to ${report.timeline.calendarEnd}`
+                  : 'Timeline Calendar'}
+              </p>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+              <span>Lower</span>
+              {[0, 1, 2, 3, 4].map((level) => (
+                <span
+                  key={`legend-${level}`}
+                  className={`h-3 w-3 rounded-xs border ${heatmapLevelClass(level)}`}
+                />
+              ))}
+              <span>Higher</span>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              {timelineByMonth.map((monthBlock) => (
+                <article
+                  key={monthBlock.month}
+                  className="rounded-xl border border-slate-200 bg-slate-50/60 p-4"
+                >
+                  <p className="text-sm font-bold text-slate-900">{monthBlock.monthLabel}</p>
+                  <div className="mt-3 grid grid-cols-7 gap-1.5">
+                    {monthBlock.days.map((day, index) => (
+                      <div
+                        key={day.date}
+                        className={`h-7 rounded-md border ${heatmapLevelClass(day.level)} ${
+                          day.isHeavy ? 'ring-2 ring-rose-400' : ''
+                        } ${day.isRelevant ? 'opacity-100' : 'opacity-30'}`}
+                        style={index === 0 ? { gridColumnStart: day.weekday + 1 } : undefined}
+                        title={`${day.date} | ${formatCurrency(day.total)} | ${day.count} flagged`}
+                      >
+                        <span className="sr-only">{day.date}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </MotionSection>
+        )}
+
+        {/* Spending Breakdown & Wall of Shame */}
+        {report && (
+          <div className="grid gap-6 lg:grid-cols-12 items-start">
+            {/* Spending by Merchant */}
+            <div className="white-card bg-white lg:col-span-7">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                Top Merchant Spend
+              </p>
+              <h2 className="mt-0.5 text-lg font-bold text-slate-900">Spending by Merchant</h2>
+              <div className="mt-4 space-y-3">
+                {filteredSpendingByMerchant.map((entry) => (
+                  <div
+                    key={entry.merchant}
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-3.5"
                   >
-                    {filteredSuspiciousMerchantMap[entry.merchant].badge}
-                  </button>
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <p className="font-bold capitalize text-slate-900">{entry.merchant}</p>
+                      <p className="font-extrabold text-slate-900">{formatCurrency(entry.total)}</p>
+                    </div>
+                    <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full bg-blue-600"
+                        style={{ width: `${Math.min(entry.share || 0, 100)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-500">{entry.share}% of total spend</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Wall of Shame */}
+            <div className="white-card bg-white lg:col-span-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-600">
+                Fee Offenders
+              </p>
+              <h2 className="mt-0.5 text-lg font-bold text-slate-900">Wall of Shame</h2>
+              <div className="mt-4 space-y-2.5">
+                {filteredWallOfShame.length === 0 ? (
+                  <p className="text-xs text-slate-500">No hidden fee offenders detected.</p>
+                ) : (
+                  filteredWallOfShame.map((entry, index) => (
+                    <div
+                      key={`${entry.merchant}-${index}`}
+                      className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs"
+                    >
+                      <p className="font-bold capitalize text-slate-900">{entry.merchant}</p>
+                      <span className="font-extrabold text-rose-700">{formatCurrency(entry.total)}</span>
+                    </div>
+                  ))
                 )}
-                <p className="mt-2 text-sm text-rose-300">
-                  Hidden Fees: {formatCurrency(entry.total)}
-                </p>
-              </MotionArticle>
-            ))}
+              </div>
+            </div>
           </div>
-        </MotionSection>
+        )}
       </main>
+
+      {/* Transaction Details Modal */}
+      {selectedTransaction && (
+        <TransactionDetailsModal
+          transaction={selectedTransaction}
+          onClose={() => setSelectedTransaction(null)}
+        />
+      )}
     </div>
   )
 }

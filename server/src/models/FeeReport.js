@@ -10,6 +10,7 @@ const feeReportSchema = new mongoose.Schema(
       transparentSpending: Number,
       flaggedTransactions: Number,
       scannedTransactions: Number,
+      totalSpent: Number,
     },
     wallOfShame: [
       {
@@ -84,6 +85,55 @@ const feeReportSchema = new mongoose.Schema(
       calendarStart: String,
       calendarEnd: String,
       maxDailyHiddenFee: Number,
+    },
+    categories: [
+      {
+        category: String,
+        total: Number,
+        count: Number,
+        share: Number,
+      },
+    ],
+    recurringPayments: [
+      {
+        merchant: String,
+        occurrences: Number,
+        averageAmount: Number,
+        minimumAmount: Number,
+        maximumAmount: Number,
+        amountVariation: Number,
+        frequency: String,
+        averageInterval: Number,
+        estimatedMonthlyCost: Number,
+        estimatedAnnualCost: Number,
+        confidence: Number,
+        subscriptionStatus: String,
+      },
+    ],
+    subscriptions: [
+      {
+        merchant: String,
+        occurrences: Number,
+        averageAmount: Number,
+        estimatedMonthlyCost: Number,
+        estimatedAnnualCost: Number,
+        frequency: String,
+        confidence: Number,
+        subscriptionStatus: String,
+      },
+    ],
+    riskSummary: {
+      averageRiskScore: Number,
+      overallRiskLevel: String,
+      lowCount: Number,
+      mediumCount: Number,
+      highCount: Number,
+    },
+    potentialSavings: {
+      monthlyEstimate: Number,
+      annualEstimate: Number,
+      contributingCount: Number,
+      disclaimer: String,
     },
   },
   { minimize: true }

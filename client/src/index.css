@@ -2,14 +2,16 @@
 @import 'tailwindcss';
 
 :root {
-  --bg-deep: #08131d;
-  --bg-card: rgba(8, 22, 34, 0.62);
-  --line-soft: rgba(148, 163, 184, 0.28);
-  --accent-cyan: #34d6ff;
-  --accent-amber: #ffb257;
-  font-family: 'Manrope', 'Segoe UI', sans-serif;
-  color: #e5edf5;
-  background-color: var(--bg-deep);
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --border-subtle: #e2e8f0;
+  --primary-text: #0f172a;
+  --secondary-text: #475569;
+  --accent-blue: #0284c7;
+  --accent-teal: #0d9488;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #0f172a;
+  background-color: #f8fafc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -23,23 +25,22 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 18% 12%, rgba(52, 214, 255, 0.18), transparent 38%),
-    radial-gradient(circle at 82% 7%, rgba(255, 178, 87, 0.17), transparent 42%),
-    linear-gradient(180deg, #08131d 0%, #060f18 55%, #050d14 100%);
+  background-color: #f8fafc;
+  color: #0f172a;
 }
 
 #root {
   min-height: 100vh;
+  background-color: #f8fafc;
 }
 
-.glass-panel {
-  border: 1px solid var(--line-soft);
-  border-radius: 1.25rem;
-  background: linear-gradient(150deg, rgba(9, 26, 39, 0.8), rgba(7, 19, 29, 0.58));
-  backdrop-filter: blur(18px);
-  box-shadow: 0 28px 85px rgba(0, 0, 0, 0.4);
-  padding: 1.2rem;
+.glass-panel,
+.white-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  padding: 1.25rem;
 }
 
 h1,

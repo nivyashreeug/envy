@@ -2,11 +2,33 @@
 
 Production-ready MERN application for detecting hidden charges from uploaded bank statements (CSV/PDF) with a premium dark UI and privacy-first architecture.
 
-## Stack
+## 🛠️ Tech Stack
 
-- Frontend: React + Vite + Tailwind CSS + Framer Motion + Recharts
-- Backend: Node.js + Express + multer + MongoDB (optional aggregate persistence)
-- Security: Helmet, rate limiting, CORS allow-list, compressed responses, no raw statement persistence
+### Frontend
+- React
+- Vite
+- Tailwind CSS
+- Framer Motion
+- Recharts
+
+### Backend
+- Node.js
+- Express
+- Multer
+- MongoDB
+
+### Security
+- JWT
+- bcrypt
+- Helmet
+- CORS
+- Rate limiting
+- Redis
+
+### DevOps
+- Docker
+- Docker Compose
+- GitHub Actions
 
 ## Key Privacy Guarantees
 

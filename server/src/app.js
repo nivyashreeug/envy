@@ -20,7 +20,29 @@ const { notFoundHandler, errorHandler } = require('./middleware/errorHandler')
 
 const TEN_MB = 10 * 1024 * 1024
 const ALLOWED_EXTENSIONS = new Set(['csv', 'pdf'])
+const ALLOWED_MIME_TYPES = new Set([
+  'text/csv',
+  'application/vnd.ms-excel',
+  'text/plain',
+  'application/csv',
+  'text/x-csv',
+  'application/x-csv',
+  'text/comma-separated-values',
+  'text/x-comma-separated-values',
+  'application/pdf',
+  'application/x-pdf',
+  'application/acrobat',
+  'applications/vnd.pdf',
+  'text/pdf',
+  'application/octet-stream',
+])
 const MIN_PASSWORD_LENGTH = 8
+const MAX_STRING_LENGTH = 254
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function isValidEmail(email) {
+  return typeof email === 'string' && email.length <= MAX_STRING_LENGTH && EMAIL_REGEX.test(email)
+}
 
 function getAllowedOrigins() {
   const origins = process.env.CORS_ORIGINS || process.env.CLIENT_ORIGIN || 'http://localhost:5173'
@@ -38,15 +60,17 @@ function isLocalDevOrigin(origin) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
 }
 
-function getRateLimitConfig() {
+function getRateLimitConfig(customOptions = {}) {
+  const isTest = process.env.NODE_ENV === 'test'
   const config = {
-    windowMs: 15 * 60 * 1000,
-    max: Number(process.env.RATE_LIMIT_MAX || 120),
+    windowMs: customOptions.windowMs || 15 * 60 * 1000,
+    max: isTest ? 10000 : Number(customOptions.max || process.env.RATE_LIMIT_MAX || 120),
     standardHeaders: true,
     legacyHeaders: false,
+    ...customOptions,
   }
 
-  if (!process.env.REDIS_URL) {
+  if (isTest || !process.env.REDIS_URL) {
     return config
   }
 
@@ -66,15 +90,36 @@ function getRateLimitConfig() {
   return config
 }
 
+const authLimiter = rateLimit(
+  getRateLimitConfig({
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
+    message: { error: 'Too many authentication attempts. Please try again after 15 minutes.' },
+  })
+)
+
+const analyzeLimiter = rateLimit(
+  getRateLimitConfig({
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.ANALYZE_RATE_LIMIT_MAX || 60),
+    message: { error: 'Upload rate limit exceeded. Please try again later.' },
+  })
+)
+
 const storage = multer.memoryStorage()
 const upload = multer({
   storage,
   limits: { fileSize: TEN_MB },
   fileFilter: (req, file, callback) => {
     const extension = (file.originalname.split('.').pop() || '').toLowerCase()
+    const mime = (file.mimetype || '').toLowerCase()
 
     if (!ALLOWED_EXTENSIONS.has(extension)) {
       return callback(new Error('Unsupported file format. Please upload CSV or PDF.'))
+    }
+
+    if (mime && !ALLOWED_MIME_TYPES.has(mime) && !mime.includes('csv') && !mime.includes('pdf')) {
+      return callback(new Error('Invalid file type. Only CSV and PDF files are allowed.'))
     }
 
     return callback(null, true)
@@ -132,7 +177,7 @@ function createApp() {
     })
   })
 
-  app.post('/api/auth/register', async (req, res, next) => {
+  app.post('/api/auth/register', authLimiter, async (req, res, next) => {
     try {
       const name = String(req.body?.name || '').trim()
       const email = String(req.body?.email || '').trim().toLowerCase()
@@ -141,6 +186,11 @@ function createApp() {
       if (!name || !email || !password) {
         res.status(400)
         throw new Error('Name, email, and password are required.')
+      }
+
+      if (!isValidEmail(email)) {
+        res.status(400)
+        throw new Error('Please provide a valid email address.')
       }
 
       if (password.length < MIN_PASSWORD_LENGTH) {
@@ -167,7 +217,7 @@ function createApp() {
     }
   })
 
-  app.post('/api/auth/login', async (req, res, next) => {
+  app.post('/api/auth/login', authLimiter, async (req, res, next) => {
     try {
       const email = String(req.body?.email || '').trim().toLowerCase()
       const password = String(req.body?.password || '').trim()
@@ -209,7 +259,7 @@ function createApp() {
     res.json({ user: req.auth.user })
   })
 
-  app.post('/api/analyze', requireAuth, upload.single('statement'), async (req, res, next) => {
+  app.post('/api/analyze', analyzeLimiter, requireAuth, upload.single('statement'), async (req, res, next) => {
     try {
       if (!req.file) {
         res.status(400)
@@ -236,6 +286,11 @@ function createApp() {
           insights: report.insights,
           anomalies: report.anomalies,
           timeline: report.timeline,
+          categories: report.categories,
+          recurringPayments: report.recurringPayments,
+          subscriptions: report.subscriptions,
+          riskSummary: report.riskSummary,
+          potentialSavings: report.potentialSavings,
         })
       }
 
