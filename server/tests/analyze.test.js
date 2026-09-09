@@ -28,6 +28,14 @@ describe('Envy API', () => {
     expect(response.body.status).toBe('ok')
   })
 
+  it('returns API status on /api/status', async () => {
+    const response = await request(app).get('/api/status')
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.status).toBe('ok')
+    expect(response.body.message).toBe('Envy API is running')
+  })
+
   it('analyzes CSV statement and flags hidden fees', async () => {
     const fixturePath = path.join(__dirname, 'fixtures', 'sample-statement.csv')
     const token = await registerAndGetToken()
@@ -160,5 +168,40 @@ describe('Envy API', () => {
 
     expect(emptyRes.statusCode).toBe(400)
     expect(emptyRes.body.error).toMatch(/No transactions found/i)
+  })
+
+  describe('Production static serving', () => {
+    let originalEnv
+    let prodApp
+
+    beforeAll(() => {
+      originalEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = 'production'
+      prodApp = createApp()
+    })
+
+    afterAll(() => {
+      process.env.NODE_ENV = originalEnv
+    })
+
+    it('serves React index.html at GET / in production', async () => {
+      const response = await request(prodApp).get('/')
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toMatch(/html/)
+      expect(response.text).toContain('id="root"')
+    })
+
+    it('serves React index.html at SPA fallback route in production', async () => {
+      const response = await request(prodApp).get('/dashboard')
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toMatch(/html/)
+      expect(response.text).toContain('id="root"')
+    })
+
+    it('preserves /api/health in production', async () => {
+      const response = await request(prodApp).get('/api/health')
+      expect(response.statusCode).toBe(200)
+      expect(response.body.status).toBe('ok')
+    })
   })
 })

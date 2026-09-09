@@ -154,7 +154,7 @@ function createApp() {
     app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
   }
 
-  app.get('/', (req, res) => {
+  app.get('/api/status', (req, res) => {
     res.json({
       status: 'ok',
       message: 'Envy API is running',
